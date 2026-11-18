@@ -14,6 +14,8 @@ fps = 30
 [mcp23017]
 i2c_bus = 1
 address = 0x20
+# Pi 4: usually gpiochip0. Pi 5 (RP1, 40-pin header): usually gpiochip4.
+# FXBox will try common chips automatically if this one is unavailable.
 gpiochip = "gpiochip0"
 # Interrupt outputs of the MCP23017, as BCM GPIO numbers.
 # Zynthian's config lists them as wiringPi pins 2 and 7, which are BCM 27 and 4.

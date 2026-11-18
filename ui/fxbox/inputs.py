@@ -11,6 +11,7 @@ Events put on the queue (timestamps from time.monotonic()):
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 import time
@@ -150,6 +151,19 @@ class McpInputs:
         self._wait = self._make_irq_waiter()
         return True
 
+    def _gpiochip_candidates(self):
+        names = []
+        for name in (self.cfg.gpiochip, "gpiochip4", "gpiochip0"):
+            if name and name not in names:
+                names.append(name)
+        try:
+            for name in sorted(os.listdir("/dev")):
+                if name.startswith("gpiochip") and name not in names:
+                    names.append(name)
+        except OSError:
+            pass
+        return names
+
     def _make_irq_waiter(self):
         """Returns wait(timeout_s) that blocks until an MCP interrupt or timeout."""
         try:
@@ -158,35 +172,44 @@ class McpInputs:
             log.warning("python gpiod not available: polling the MCP23017")
             return None
         pins = [self.cfg.int_a_gpio, self.cfg.int_b_gpio]
-        try:
-            if hasattr(gpiod, "request_lines"):   # libgpiod v2 API
-                from gpiod.line import Edge  # type: ignore
-                req = gpiod.request_lines(
-                    "/dev/" + self.cfg.gpiochip, consumer="fxbox",
-                    config={tuple(pins): gpiod.LineSettings(edge_detection=Edge.RISING)})
+        last_err = None
+        for name in self._gpiochip_candidates():
+            path = "/dev/" + name
+            if not os.path.exists(path):
+                continue
+            try:
+                if hasattr(gpiod, "request_lines"):   # libgpiod v2 API
+                    from gpiod.line import Edge  # type: ignore
+                    req = gpiod.request_lines(
+                        path, consumer="fxbox",
+                        config={tuple(pins): gpiod.LineSettings(edge_detection=Edge.RISING)})
+                    self.cfg.gpiochip = name
 
-                def wait(timeout):
-                    if req.wait_edge_events(timeout):
-                        req.read_edge_events()
+                    def wait(timeout, _req=req):
+                        if _req.wait_edge_events(timeout):
+                            _req.read_edge_events()
+                            return True
+                        return False
+                    return wait
+                chip = gpiod.Chip(name)          # libgpiod v1 API (Bookworm)
+                lines = chip.get_lines(pins)
+                lines.request(consumer="fxbox", type=gpiod.LINE_REQ_EV_RISING_EDGE)
+                self.cfg.gpiochip = name
+
+                def wait_v1(timeout, _lines=lines):
+                    sec = int(timeout)
+                    ev = _lines.event_wait(sec=sec, nsec=int((timeout - sec) * 1e9))
+                    if ev:
+                        for line in ev:
+                            line.event_read()
                         return True
                     return False
-                return wait
-            chip = gpiod.Chip(self.cfg.gpiochip)          # libgpiod v1 API (Bookworm)
-            lines = chip.get_lines(pins)
-            lines.request(consumer="fxbox", type=gpiod.LINE_REQ_EV_RISING_EDGE)
-
-            def wait_v1(timeout):
-                sec = int(timeout)
-                ev = lines.event_wait(sec=sec, nsec=int((timeout - sec) * 1e9))
-                if ev:
-                    for line in ev:
-                        line.event_read()
-                    return True
-                return False
-            return wait_v1
-        except Exception as e:
-            log.warning("interrupt lines unavailable (%s): polling the MCP23017", e)
-            return None
+                return wait_v1
+            except Exception as e:
+                last_err = e
+                continue
+        log.warning("interrupt lines unavailable (%s): polling the MCP23017", last_err)
+        return None
 
     # --- runtime
 

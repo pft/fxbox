@@ -17,6 +17,8 @@ import time
 
 from . import config
 
+AUDIO_CONF = "/etc/fxbox/audio.conf"
+
 PIN_NAMES = [f"GPA{i}" for i in range(8)] + [f"GPB{i}" for i in range(8)]
 
 
@@ -25,6 +27,67 @@ def sh(cmd: str) -> str:
         return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10).stdout
     except Exception as e:  # pragma: no cover
         return str(e)
+
+
+def read_audio_conf(path: str = AUDIO_CONF) -> dict[str, str]:
+    data: dict[str, str] = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                data[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return data
+
+
+def find_gpiochip(preferred: str) -> tuple[str | None, str]:
+    """Return (device path, detail). Tries preferred, then common Pi 5/4 chips."""
+    candidates = []
+    for name in (preferred, "gpiochip4", "gpiochip0"):
+        if name and name not in candidates:
+            candidates.append(name)
+    try:
+        for name in sorted(os.listdir("/dev")):
+            if name.startswith("gpiochip") and name not in candidates:
+                candidates.append(name)
+    except OSError:
+        pass
+    labels = {}
+    for name in candidates:
+        label = ""
+        try:
+            with open(f"/sys/class/gpio/{name}/label") as f:  # legacy, often absent
+                label = f.read().strip()
+        except OSError:
+            try:
+                out = sh(f"gpiodetect 2>/dev/null | grep '^{name} '").strip()
+                if out:
+                    label = out
+            except Exception:
+                label = ""
+        labels[name] = label
+        if os.path.exists("/dev/" + name):
+            return "/dev/" + name, label or name
+    return None, ", ".join(f"/dev/{n}" for n in candidates)
+
+
+def find_din_device(configured: str | None = None) -> tuple[str | None, str]:
+    candidates = []
+    if configured:
+        candidates.append(configured)
+    for name in ("/dev/ttyAMA0", "/dev/ttyAMA10", "/dev/serial0"):
+        if name not in candidates:
+            candidates.append(name)
+    for dev in candidates:
+        if os.path.exists(dev):
+            real = os.path.realpath(dev)
+            detail = dev if real == dev else f"{dev} -> {real}"
+            return dev, detail
+    return None, f"geprobeerd: {', '.join(candidates)}"
 
 
 def check(cfg) -> int:
@@ -70,8 +133,11 @@ def check(cfg) -> int:
         line(size == f"{cfg.display.width},{cfg.display.height}" and bpp == "16", f"scherm {fb}", f"{size} @ {bpp} bpp")
     else:
         line(False, f"scherm {fb}", "framebuffer ontbreekt (overlay piscreen2r-notouch geladen?)")
-    line(os.path.exists("/dev/ttyAMA0"), "DIN-MIDI UART /dev/ttyAMA0")
-    line(os.path.exists("/dev/gpiochip0"), "GPIO-chip voor MCP-interrupts")
+    audio = read_audio_conf()
+    din_dev, din_detail = find_din_device(audio.get("DIN_DEVICE"))
+    line(din_dev is not None, f"DIN-MIDI UART {din_dev or audio.get('DIN_DEVICE', '/dev/ttyAMA0')}", din_detail)
+    gpio_dev, gpio_detail = find_gpiochip(getattr(cfg.inputs, "gpiochip", "gpiochip0"))
+    line(gpio_dev is not None, "GPIO-chip voor MCP-interrupts", gpio_detail)
     print("Alles aanwezig." if ok else "Niet alles gevonden — zie docs/MANUAL.nl.md, Herstel.")
     return 0 if ok else 1
 
