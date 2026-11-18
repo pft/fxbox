@@ -4,6 +4,8 @@
 
 FXBox turns a Zynthian Kit V4 (Raspberry Pi 4) into a standalone multi-effect unit for external instruments. The device does not need the Zynthian software, nor a computer, browser or internet connection while you play.
 
+> **Raspberry Pi 5:** experimental/best-effort support is included in the installer (it selects Pi 5 CPU tuning and Pi 5–oriented UART/DIN-MIDI boot settings based on zynthian-sys). The ZynScreen, ZynADAC/controls and DIN MIDI on Pi 5 + V4 kit are not fully validated here—test on a separate SD card and verify with `sudo fxbox-hwtest check`. Pi 4 remains the tested target.
+
 ```
 instrument → input → Filter → Saturation → Distortion → Chorus → Phaser → Tape Echo → Reverb → Compressor → output
 ```

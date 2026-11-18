@@ -7,10 +7,13 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Pi 4 (Cortex-A72) tuning when building natively on the device.
+# Raspberry Pi tuning when building natively on the device.
 option(FXBOX_TUNE_PI4 "Tune for Raspberry Pi 4 (Cortex-A72)" OFF)
+option(FXBOX_TUNE_PI5 "Tune for Raspberry Pi 5 (Cortex-A76)" OFF)
 set(FXBOX_FLAGS -O2 -Wall -Wextra -Wno-unused-parameter -fno-math-errno)
-if(FXBOX_TUNE_PI4)
+if(FXBOX_TUNE_PI5)
+  list(APPEND FXBOX_FLAGS -mcpu=cortex-a76)
+elseif(FXBOX_TUNE_PI4)
   list(APPEND FXBOX_FLAGS -mcpu=cortex-a72)
 endif()
 

@@ -4,6 +4,8 @@
 
 All values come from Zynthian's own configuration for the V4 kit. Nothing is guessed; anything that cannot be determined from the sources is listed at the bottom under "To confirm on the device". Hardware settings are kept separate from the code, in `/etc/fxbox/hardware.toml` and `/etc/fxbox/audio.conf`.
 
+> **Raspberry Pi 5 (experimental):** the values below are the Pi 4/V4 reference. When installed with `--model`/auto-detected as Pi 5, FXBox applies best-effort UART/DIN-MIDI boot settings derived from zynthian-sys (`uart0-pi5` + `midi-uart0` instead of `miniuart-bt`). Other HAT pin/overlay settings (ZynScreen, ZynADAC, MCP23017) are kept the same but are not yet fully validated on Pi 5; confirm on the device with `sudo fxbox-hwtest check`.
+
 Sources (consulted 31-10-2026):
 
 - **zynthian-sys** (branch `vangelis`, commit `c2eea576`): `config/zynthian_envars_V4.sh`, `sbin/zynthian_autoconfig.py`, `boot/config.txt`, `custom/display/ZynScreen 3.5 (v1)/boot/overlays/*.dts`, `sbin/fix_alsamixer_settings.sh`, `etc/systemd/mod-ttymidi.service` — <https://github.com/zynthian/zynthian-sys>

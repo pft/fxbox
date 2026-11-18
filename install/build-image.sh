@@ -12,6 +12,7 @@
 #   --user NAAM          gebruiker voor SSH-onderhoud (verplicht)
 #   --password WACHTW    wachtwoord (anders wordt erom gevraagd)
 #   --hostname NAAM      hostnaam (standaard: fxbox)
+#   --target pi4|pi5     doelmodel (standaard: pi4). pi5 is experimenteel (best effort)
 #   --base BESTAND|URL   basis-image (.img of .img.xz). Standaard: de nieuwste
 #                        Raspberry Pi OS Lite 64-bit "oldstable" (= Bookworm)
 #   --out MAP            uitvoermap (standaard: ./image-out)
@@ -28,22 +29,27 @@ VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/ui/fxbox/__init__.py")"
 DEFAULT_BASE="https://downloads.raspberrypi.com/raspios_oldstable_lite_arm64_latest"
 EXTRA_MB=1536
 
-USER_NAME=""; PASSWORD=""; HOSTNAME_NEW="fxbox"; BASE="$DEFAULT_BASE"
+USER_NAME=""; PASSWORD=""; HOSTNAME_NEW="fxbox"; BASE="$DEFAULT_BASE"; TARGET="pi4"
 OUT="$PWD/image-out"; XZ=0; ALLOW_TRIXIE=0; SKIP_INSTALL=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --user) USER_NAME="$2"; shift 2 ;;
         --password) PASSWORD="$2"; shift 2 ;;
         --hostname) HOSTNAME_NEW="$2"; shift 2 ;;
+        --target) TARGET="$2"; shift 2 ;;
         --base) BASE="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --xz) XZ=1; shift ;;
         --allow-trixie) ALLOW_TRIXIE=1; shift ;;
         --skip-install) SKIP_INSTALL=1; shift ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
         *) echo "Onbekende optie: $1"; exit 2 ;;
     esac
 done
+case "$TARGET" in
+    pi4|pi5) ;;
+    *) echo "FOUT: --target moet pi4 of pi5 zijn (gevonden: $TARGET)" >&2; exit 2 ;;
+esac
 
 say()  { echo -e "\n==> $*"; }
 die()  { echo "FOUT: $*" >&2; exit 1; }
@@ -187,8 +193,8 @@ say "FXBox-bronnen kopiëren naar /opt/fxbox-src"
 rsync -a --delete --exclude 'engine/build*' --exclude '__pycache__' --exclude 'image-out' "$SRC/" "$MNT/opt/fxbox-src/"
 
 if [ "$SKIP_INSTALL" = 0 ]; then
-    say "FXBox installeren in de chroot (onder emulatie kan dit lang duren)"
-    chroot "$MNT" /bin/bash -c "cd /opt/fxbox-src && ./install/install.sh --yes --force"
+    say "FXBox installeren in de chroot (doel: $TARGET; onder emulatie kan dit lang duren)"
+    chroot "$MNT" /bin/bash -c "cd /opt/fxbox-src && FXBOX_TARGET_MODEL=$TARGET ./install/install.sh --yes --force"
     chroot "$MNT" /bin/bash -c "apt-get clean"
     cp "$MNT/var/log/fxbox-install.log" "$OUT/fxbox-install-$VERSION.log" 2>/dev/null || true
 fi

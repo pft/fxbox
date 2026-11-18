@@ -1,6 +1,6 @@
 #!/bin/bash
 # FXBox installer for a fresh Raspberry Pi OS Lite (64-bit, Bookworm) on a
-# Raspberry Pi 4 inside a Zynthian Kit V4.
+# Raspberry Pi 4 or Raspberry Pi 5 inside a Zynthian Kit V4.
 #
 # Uitvoeren op de Pi, vanuit de uitgepakte projectmap:
 #     sudo ./install/install.sh            (vraagt bevestiging voor de opstartconfiguratie)
@@ -50,10 +50,27 @@ echo "FXBox install $(date -Is) from $SRC"
 say "Hardware en besturingssysteem controleren"
 MODEL="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo unknown)"
 echo "Model: $MODEL"
-if [[ "$MODEL" != *"Raspberry Pi 4"* ]]; then
-    [ "$FORCE" = 1 ] || die "dit installatiescript is voor een Raspberry Pi 4 (gevonden: $MODEL). Gebruik --force om toch door te gaan."
-    warn "geen Raspberry Pi 4 — toch verder door --force"
+TARGET_MODEL="${FXBOX_TARGET_MODEL:-}"
+if [ -z "$TARGET_MODEL" ]; then
+    case "$MODEL" in
+        *"Raspberry Pi 4"*) TARGET_MODEL="pi4" ;;
+        *"Raspberry Pi 5"*) TARGET_MODEL="pi5" ;;
+        *) TARGET_MODEL="unknown" ;;
+    esac
 fi
+case "$TARGET_MODEL" in
+    pi4) CMAKE_TUNE_ARGS=(-DFXBOX_TUNE_PI4=ON) ;;
+    pi5)
+        CMAKE_TUNE_ARGS=(-DFXBOX_TUNE_PI5=ON)
+        warn "Raspberry Pi 5 wordt experimenteel (best effort) ondersteund. FXBox is ontworpen/getest voor een Raspberry Pi 4 + Zynthian Kit V4; scherm/bediening/DIN-MIDI/audio kunnen op een Pi 5 extra afstemming vereisen."
+        ;;
+    *)
+        [ "$FORCE" = 1 ] || die "dit installatiescript is voor een Raspberry Pi 4 of 5 (gevonden: $MODEL). Gebruik --force om toch door te gaan."
+        warn "onbekend model ($MODEL) — toch verder door --force"
+        CMAKE_TUNE_ARGS=()
+        TARGET_MODEL="pi4"
+        ;;
+esac
 [ "$(uname -m)" = "aarch64" ] || die "64-bit besturingssysteem nodig (gevonden: $(uname -m)). Schrijf 'Raspberry Pi OS Lite (64-bit)' naar de kaart."
 . /etc/os-release
 echo "OS: $PRETTY_NAME"
@@ -86,9 +103,9 @@ dpkg-query -W -f='${Package} ${Version}\n' jackd2 libjack-jackd2-0 python3-cairo
     fonts-inter fonts-jetbrains-mono 2>/dev/null > "$SRC/install/installed-package-versions.txt" || true
 
 # ------------------------------------------------------------------ 3. build engine
-say "Audio-engine bouwen"
+say "Audio-engine bouwen ($TARGET_MODEL)"
 BUILD="$SRC/engine/build-pi"
-cmake -S "$SRC/engine" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DFXBOX_TUNE_PI4=ON
+cmake -S "$SRC/engine" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release "${CMAKE_TUNE_ARGS[@]}"
 cmake --build "$BUILD" -j"$(nproc)"
 say "Engine-tests uitvoeren op deze Pi"
 "$BUILD/test_tempo"
@@ -141,14 +158,18 @@ for o in piscreen2r-notouch piscreen2r-backlight; do
 done
 
 say "Opstartconfiguratie ($BOOT/config.txt, $BOOT/cmdline.txt)"
+if [ "$TARGET_MODEL" = "pi5" ]; then
+    UART_DESC="de UART voor DIN-MIDI (midi-uart0 via uart0-pi5)"
+else
+    UART_DESC="de UART voor DIN-MIDI (midi-uart0; Bluetooth naar de mini-UART)"
+fi
 cat <<EOF
-Wordt ingeschakeld: I2C, SPI, I2S, de UART voor DIN-MIDI (midi-uart0; Bluetooth
-naar de mini-UART), de ZynADAC/HiFiBerry-overlay en de ZynScreen-overlays.
-De ingebouwde audio en de seriële console gaan uit.
-Reservekopieën: $BOOT/config.txt.fxbox-backup en $BOOT/cmdline.txt.fxbox-backup
+Wordt ingeschakeld: I2C, SPI, I2S, $UART_DESC, de ZynADAC/HiFiBerry-overlay
+en de ZynScreen-overlays. De ingebouwde audio en de seriële console gaan uit.
+Doel: $TARGET_MODEL. Reservekopieën: $BOOT/config.txt.fxbox-backup en $BOOT/cmdline.txt.fxbox-backup
 EOF
 if ask "Deze opstartwijzigingen nu toepassen?"; then
-    "$SRC/install/boot-config.sh" "$BOOT"
+    FXBOX_TARGET_MODEL="$TARGET_MODEL" "$SRC/install/boot-config.sh" "$BOOT" --model "$TARGET_MODEL"
     echo "  klaar"
 else
     warn "opstartconfiguratie NIET gewijzigd — scherm, bediening en audio werken pas nadat die is toegepast"
