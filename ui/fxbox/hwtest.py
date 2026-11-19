@@ -44,35 +44,45 @@ def read_audio_conf(path: str = AUDIO_CONF) -> dict[str, str]:
     return data
 
 
-def find_gpiochip(preferred: str) -> tuple[str | None, str]:
-    """Return (device path, detail). Tries preferred, then common Pi 5/4 chips."""
-    candidates = []
-    for name in (preferred, "gpiochip4", "gpiochip0"):
-        if name and name not in candidates:
-            candidates.append(name)
-    try:
-        for name in sorted(os.listdir("/dev")):
-            if name.startswith("gpiochip") and name not in candidates:
-                candidates.append(name)
-    except OSError:
-        pass
-    labels = {}
-    for name in candidates:
-        label = ""
+def _gpiochip_labels() -> dict[str, str]:
+    labels: dict[str, str] = {}
+    out = sh("gpiodetect 2>/dev/null")
+    for line in out.splitlines():
+        # e.g. "gpiochip15 [pinctrl-rp1] (54 lines)"
+        parts = line.split()
+        if parts and parts[0].startswith("gpiochip"):
+            labels[parts[0]] = line.strip()
+    if not labels:
         try:
-            with open(f"/sys/class/gpio/{name}/label") as f:  # legacy, often absent
-                label = f.read().strip()
+            for name in os.listdir("/dev"):
+                if name.startswith("gpiochip"):
+                    labels[name] = name
         except OSError:
-            try:
-                out = sh(f"gpiodetect 2>/dev/null | grep '^{name} '").strip()
-                if out:
-                    label = out
-            except Exception:
-                label = ""
-        labels[name] = label
+            pass
+    return labels
+
+
+def find_gpiochip(preferred: str) -> tuple[str | None, str]:
+    """Return (device path, detail). Prefers configured chip, then Pi 5/4 header chips."""
+    labels = _gpiochip_labels()
+    ordered: list[str] = []
+    for name in (preferred,):
+        if name and name not in ordered:
+            ordered.append(name)
+    # Pi 5 40-pin header is usually on pinctrl-rp1 (often gpiochip4 or gpiochip15).
+    for name, label in labels.items():
+        if "pinctrl-rp1" in label and name not in ordered:
+            ordered.append(name)
+    for name in ("gpiochip4", "gpiochip15", "gpiochip0"):
+        if name not in ordered:
+            ordered.append(name)
+    for name in sorted(labels):
+        if name not in ordered:
+            ordered.append(name)
+    for name in ordered:
         if os.path.exists("/dev/" + name):
-            return "/dev/" + name, label or name
-    return None, ", ".join(f"/dev/{n}" for n in candidates)
+            return "/dev/" + name, labels.get(name, name)
+    return None, ", ".join(f"/dev/{n}" for n in ordered)
 
 
 def find_din_device(configured: str | None = None) -> tuple[str | None, str]:

@@ -153,16 +153,34 @@ class McpInputs:
 
     def _gpiochip_candidates(self):
         names = []
-        for name in (self.cfg.gpiochip, "gpiochip4", "gpiochip0"):
+        for name in (self.cfg.gpiochip, "gpiochip4", "gpiochip15", "gpiochip0"):
             if name and name not in names:
                 names.append(name)
+        # Prefer chips labeled pinctrl-rp1 (Pi 5 40-pin header) when detectable.
+        try:
+            import subprocess
+            out = subprocess.run(["gpiodetect"], capture_output=True, text=True, timeout=5).stdout
+            rp1 = [ln.split()[0] for ln in out.splitlines() if ln.startswith("gpiochip") and "pinctrl-rp1" in ln]
+            if rp1:
+                # Keep configured first, then rp1 chips, then the rest.
+                rest = [n for n in names if n not in rp1 and n != self.cfg.gpiochip]
+                names = ([self.cfg.gpiochip] if self.cfg.gpiochip else []) + [n for n in rp1 if n != self.cfg.gpiochip] + rest
+        except Exception:
+            pass
         try:
             for name in sorted(os.listdir("/dev")):
                 if name.startswith("gpiochip") and name not in names:
                     names.append(name)
         except OSError:
             pass
-        return names
+        # de-duplicate while preserving order
+        seen = set()
+        ordered = []
+        for n in names:
+            if n and n not in seen:
+                seen.add(n)
+                ordered.append(n)
+        return ordered
 
     def _make_irq_waiter(self):
         """Returns wait(timeout_s) that blocks until an MCP interrupt or timeout."""
